@@ -1,0 +1,85 @@
+搭建一台健壮的E-mail服务器 为Postfix配置SASL用户认证
+ 2013/07/07  邮件服务器  服务器搭建与应用  评论  6,179
+通过验证配置可以发现，基本配置只能在mynetwork规定的ip范围内使用。如果超出这个范围（可信网络范围），在RCPT TO命令之后，就会出现554 Relay access denied错误。而在可信网络范围之内，任何人都可以以任何邮件地址发送电子邮件。这根本不是我们想要的电子邮件服务器。
+
+所以需要通过SASL实现基于用户帐号的访问。以实现在mynetwork为localhost的情况下，所有合法用户可以在任何一台电脑以其个人名义发送电子邮件。
+
+Postfix本身没有SASL组件，需要使用第三方组件来实现SASL。与Postfix配合较好的有：dovecot-SASL和cyrus-SASL。两者各有千秋，使用哪个根据实际选择即可。文中两种都有涉及。
+
+SASL可以通过passwd，pam，mysql，ldap等多种方式实现授权。为了节省时间，下面仅使用passwd讲解。只要passwd文件配置正确其他的就容易多了。
+
+Postfix配置SASL
+
+Postfix配置SASL调用方式和类型。下面四条语句大概意思是：启用sasl授权，打开就客户端兼容支持，设置sasl的本地信任域，sasl安全选项级别为不允许匿名登录。然后通过smtpd_recipient_restrictions语句限制，除了本地网络的用户之外，允许通过SASL认证的用户使用STMP服务。拒绝其他所有用户的连接请求。Postfix视配置文件中以空格开头的行做为上一行的继续。
+
+smtpd_sasl_auth_enable = yes
+broken_sasl_auth_clients = yes
+smtpd_sasl_local_domain = $myhostname
+smtpd_sasl_security_options = noanonymous
+smtpd_recipient_restrictions =
+ permit_mynetworks,
+ permit_sasl_authenticated,
+ reject_invalid_hostname,
+ reject_unauth_pipelining
+使用dovecot-sasl
+
+在Postfix配置文件main.cf中添加下面两行，以启用dovecot-sasl
+
+smtpd_sasl_type = dovecot
+smtpd_sasl_path = private/auth
+dovecot集成多种授权方式，下面仅配置Postfix通过dovecot使用系统用户授权方式。由于auth-system.conf.ext文件中的默认配置已经能够很好的工作，这里就不涉及到修改其文件内容了。如果使用的是mysql的话，还需要在安装Dovecot-mysql软件包之后，手动在其相应的文件中配置数据库引擎和sql语句。因为，表结构是你自定义的。
+
+-->/etc/dovecot/conf.d/10-auth.cf<--
+auth_mechanisms = plain login
+##指定授权机制，即在SMTP command中auth 后面显示的内容
+!include auth-system.conf.ext
+##指定详细授权方法内容所在的文件
+-->/etc/dovecot/conf.d/10-master.cf<--
+unix_listener /var/spool/postfix/private/auth {
+##创建Unix socket所在的文件夹
+mode = 0666
+user=postfix
+group=postfix
+##指明创建的Unix socket使用的权限，以及用户和组属性
+}
+使用cyrus-sasl
+
+cryus-sasl使用/etc/sasl2/smtpd.conf配置文件。
+
+pwcheck_method: saslauthd
+mech_list: plain login
+运行service saslauthd start 启动cryus-sasl。可以通过ps aux | grep saslauthd命令发现其命令行指明saslauthd 从哪里接受请求(-m)，使用什么认证(-a)。如下所示：
+
+/usr/sbin/saslauthd -m /var/run/saslauthd -a pam
+验证你的SASL配置
+
+将客户机的IP地址移出mynetwork，telnet到smtp可以看出sasl已经生效。在测试之前创建一个普通用户，处于安全考虑SASL认证不能授权root用户。
+
+[root@mail2 ~]#-->telnet 127.0.0.1 25<--
+Trying 127.0.0.1...
+Connected to 127.0.0.1.
+Escape character is '^]'.
+220 mail2.xiyang-liu.com ESMTP Postfix (2.6.6)
+-->ehlo client<--
+250-mail2.xiyang-liu.com
+250-PIPELINING
+250-SIZE 10240000
+250-VRFY
+250-ETRN
+-->250-AUTH LOGIN PLAIN<--
+##授权机制，即auth_mechanisms或mech_list指定的内容<b>
+250-AUTH=LOGIN PLAIN
+##这行就是broken_sasl_auth_clients = yes语句的作用。
+250-ENHANCEDSTATUSCODES
+250-8BITMIME
+250 DSN
+-->auth login bG9ja2VAb*******bGl2aG9tZS5jb20=<--
+334 UGFzc3dvcmQ6
+-->aG9u****x5dw==<--
+235 2.7.0 Authentication successful
+-->mail from: locke@mail2.xiyang-liu.com<--
+250 2.1.0 Ok
+-->rcpt to: xiyangliu1987@gmail.com<--
+250 2.1.5 Ok
+##此处不会再出现554 Relay access denied的错误
+本文详细讲述了为Postfix配置SASL的详细过程，包括saslauthd和dovecot两种SASL认证模式。

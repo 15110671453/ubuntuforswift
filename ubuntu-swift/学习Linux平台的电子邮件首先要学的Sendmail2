@@ -1,0 +1,147 @@
+学习Linux平台的电子邮件首先要学的肯定是sendmail，但是随着时间推移，Sendmail变得越来越庞大。并且很多现代化的功能，Sendmail也无法继续支持。取而代之的是新秀Postfix，它具有体积小，功能强大，并且是公认的最安全的MTA。Redhat公司也将Postfix作为默认的MTA集成在RHEL中。但是，在大多数联网的Unix/Linux主机中，Sendmail使用默认配置即可完成向外界发送邮件的功能。大大方便了系统管理员。下面将通过系统默认配置的Sendmail讲述SMTP command命令。
+
+在这一节中，将引进一个新词“只发不收”。说白了就是有这么一种服务器。发件人通过它发出去的邮件，收件人无法通过“回复”功能回复邮件。即便回复了，发件人也收不到。
+
+这时或许就有人疑惑了，那这种电子邮件系统有什么用啊？我告诉你，这种邮件系统太有用了。做过Linux系统管理员的人都有这么一个体会，每天登录各种服务器，查看性能参数。服务器数量少了还好处理一些。随着服务器数量的增多，往往会忘记登录哪台服务器。为了解决这种问题，往往在服务器上编写各种脚本，收集服务器性能参数，通过电子邮件的形式发送给自己。这种情况下，服务器只发送邮件，不接收邮件！
+
+配置“只发不收”型的邮件服务器非常简单，如下所示。
+
+Sendmail安装启动
+
+安装base软件组，启动Sendmail服务。这里作者并不设置Sendmail的开机启动，因为接下来就会将MTA切换到Postfix。没必要费功夫设置这个！
+
+yum groupinstall base  -y
+service sendmail start
+查看Sendmail服务器是否运行
+
+[root@localhost ~]# service sendmail status
+sendmail (pid  1691) is running...
+sm-client (pid  1700) is running...
+邮件服务器必须配置一个全后缀主机名，因为邮件服务器是通过DNS的MX记录解析的。下面配置可在不重启服务器的情况下，设置主机名
+
+vi编辑文件/etc/sysconfig/network 添加如下几行
+hostname=mail2.xiyang-liu.com
+hostname -v mail2.xiyang-liu.com
+exit
+重新登陆系统后，执行如下语句查看主机名是否已经配置完毕
+
+[root@mail2 ~]# hostname
+mail2.xiyang-liu.com
+这时，已经可以通过senmail的默认配置向外界发送邮件了，因为本文档不着重讲解Sendmail，所以这部分配置就略去了。
+
+使用Sendmail发送邮件
+
+使用Sendmail向外界发送邮件有三种方法：
+
+直接调用Sendmail发送邮件，常用于LAMP环境下的PHP调用。
+通过SMTP命令行直接发送邮件。
+通过Linux下的命令mailx(MUA的一种)命令发送邮件。
+下面逐一讲解这三种方法。
+
+php调用Sendmail自动发邮件
+
+通过LAMP调用Sendmail在/etc/php.ini中配置节选如下
+
+; For Unix only.  You may supply arguments as well (default: "sendmail -t -i").
+; http://www.php.net/manual/en/mail.configuration.php#ini.sendmail-path
+sendmail_path = /usr/sbin/sendmail -t -i
+; to the sendmail binary. These parameters will always replace the value of
+启动apache之后，即可通过Sendmail命令直接发送邮件到特定的账户。Nagios和cacti配置中会用到这个功能。
+
+使用mailx发送邮件
+
+在Shell中，通过mailx命令发邮件，如下所示
+
+mailx -s “subject:test mail” xiyangliu1987@gmail.com
+type something here
+ctrl+D
+上述方式只能手动在命令行中手动输入邮件内容。有什么方法能不输入任何内容即可发送邮件？ 想一想，哈哈！
+
+使用SMTP Command发送邮件
+
+通过SMTP命令行发送邮件。基本命令的解释如下图所示：
+
+smtp command 解释
+
+实际命令操作如下，被双尖括号包围的是用户输入部分：
+
+[root@mail2 ~]#telnet 127.0.0.1 25
+Trying 127.0.0.1...
+Connected to 127.0.0.1.
+Escape character is '^]'.
+220 mail2.xiyang-liu.com ESMTP Sendmail 8.14.4/8.14.4; Wed, 12 Jun 2013 10:57:44 +0800
+>>ehlo client<<
+#常用来查看服务器支持那些特征，后必须跟一个标识身份的字符串
+250-mail2.xiyang-liu.com Hello localhost [127.0.0.1], pleased to meet you
+250-ENHANCEDSTATUSCODES
+250-PIPELINING
+250-8BITMIME
+250-SIZE
+250-DSN
+250-ETRN
+250-DELIVERBY
+250 help
+>>MAIL FROM: root@mail2.xiyang-liu.com <<
+#从哪里发出，这个地址可以随意填写
+250 2.1.0 root@mail2.xiyang-liu.com... Sender ok
+>>RCPT TO: manager@ xiyang-liu.com <<
+#发给谁
+250 2.1.5 manager@ xiyang-liu.com... Recipient ok
+>>DATA<<  
+#开始输入正文
+354 Enter mail, end with "." on a line by itself
+#开始输入正文，以单独英文句号结束的行标识正文结束
+subject: hello me
+#摘要
+telnet smtp to send a email.
+.  
+#输入结束
+<<250 2.0.0 r5C2vi3V010093 Message accepted for delivery
+>>quit<< 
+#退出
+221 2.0.0 lamp.honliv.com closing connection
+Connection closed by foreign host.
+Sendmail的SMTP命令行支持HELP命令提供简单的命令，如下所示：
+
+[root@mail2 ~]#telnet 127.0.0.1 25
+Trying 127.0.0.1...
+Connected to 127.0.0.1.
+Escape character is '^]'.
+220 mail2.xiyang-liu.com ESMTP Sendmail 8.14.4/8.14.4; Wed, 12 Jun 2013 11:18:57 +0800
+>>ehlo client<<
+250-mail2.xiyang-liu.com Hello localhost [127.0.0.1], pleased to meet you
+250-ENHANCEDSTATUSCODES
+250-PIPELINING
+250-8BITMIME
+250-SIZE
+250-DSN
+250-ETRN
+250-DELIVERBY
+250 HELP
+>>help<<
+214-2.0.0 This is sendmail
+214-2.0.0 Topics:
+214-2.0.0       HELO    EHLO    MAIL    RCPT    DATA
+214-2.0.0       RSET    NOOP    QUIT    HELP    VRFY
+214-2.0.0       EXPN    VERB    ETRN    DSN     AUTH
+214-2.0.0       STARTTLS
+214-2.0.0 For more info use "HELP <topic>".
+214-2.0.0 To report bugs in the implementation see
+214-2.0.0       http://www.sendmail.org/email-addresses.html
+214-2.0.0 For local information send email to Postmaster at your site.
+214 2.0.0 End of HELP info
+>>help starttls<<
+214-2.0.0 STARTTLS
+214-2.0.0       Start TLS negotiation.
+214 2.0.0 End of HELP info
+>>help auth<<
+214-2.0.0 AUTH mechanism [initial-response]
+214-2.0.0       Start authentication.
+214 2.0.0 End of HELP info
+>>quit<<
+Connection closed by foreign host.
+查看邮件是否已经被接受，如下是thunderbird的截图：
+
+smtp command 发送出去的邮件已经成功被接收
+
+本文通过Sendmail搭建的邮件服务器，着重讲解了SMTP Command的应用。为以后Postfix的讲解做好铺垫。

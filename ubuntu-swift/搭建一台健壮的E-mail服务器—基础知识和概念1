@@ -1,0 +1,127 @@
+搭建一台健壮的E-mail服务器—基础知识和概念
+ 2013/06/24  邮件服务器  服务器搭建与应用  评论  4,586
+电子邮件服务器在企业信息化中扮演着非常重要的角色。E-mail是数字社会时代交流最普遍最通用的方式。学习电子邮件服务器的搭建首先要学习E-mail的理论基础知识，术语和概念，基础运作原理。这些知识在电子邮件服务器搭建的前期显示不出来其重要性，这也是往往被懒惰的系统管理员忽略的原因。但是一旦电子邮件服务器深入应用后，就会发现每一层都以基础概念为准绳。电子邮件服务器达到分布式应用的时候，这点将更为显著。
+
+理论描述
+
+这部分知识主要涉及到MUA，MTA，MDA，E-mail Body，Base64，POP3，IMAP4等技术。
+
+主要内容
+
+概述
+
+电子邮件（E-Mail），是—种用电子手段提供信息交换的通信方式，是Internet应用最广的服务。 国内环境下，这点体会不是太明显。用即时通信软件的还是多数。但是，在国外互联网高度发达的环境下，人们日常办公，朋友之间的交流大部分都是采用E-mail的形式。Email地址由三部分组成: USER@DOMAIN. TLD。说白了就是用户名@域名.域名后缀。这三个部分缺一不可，但多了没关系，只要您确定邮件地址的合法性。Email使用SMTP协议进行发送和接收。 Email 邮件体普遍采用eml格式，内容为ascii编码的文本文件，多媒体内容需要MIME/Base64编码后才能传输。
+
+邮件体
+
+将一封eml格式的邮件使用文本阅读工具（记事本，写字板，notepad++等）以txt形式打开。您将看到，标准邮件至少包含如下几个字段：
+
+Return-Path: root@mail.honliv.com (要回复给谁)
+Delivered-To: manager@honliv.com (投递给谁)
+Received: by mail.honliv.com (CentOS 6.2 (Postfix)) (由谁接收过)
+From: root@mail.honliv.com (谁发过来的)
+To: root@mail.honliv.com (发给谁的)
+Subject: /usr/sbin/ntpdate time.honliv.com (主题)
+Content-type: text/plain; charset=UTF-8 (正文是什么编码格式的)
+      step time server 10.1.100.88 offset 3.366711 sec (正文内容)
+上述邮件体中，FROM部分并不能明确指明此邮件是谁发过来的，也无法保证按照FROM部分回复就一定能将回复邮件发给“发送者”。FROM字段和Return-Path字段的值一般情况下相同，但也有例外的时候。比如有些邮件不需要回复，或者发件人发送了一封垃圾邮件给你。正常的发送者（期待您的回复的人）都会指定明确有效FROM地址。也可以在使用A邮箱发邮件的时候，设置您的B邮件地址发送邮件，以达到特殊的目的。通常可以通过比较这两部分来确定这是不是一封垃圾邮件。
+
+To和Delivered-To两部分也不一定相同。不同的情况下，多半是因为邮件别名(mail alies)。如果在接受方服务器设置了aaa@example.com 邮件地址是bbb@example.com的别名的话。就会出现发往aaa@example.com的邮件最终被bbb@example.com所接收。但是邮件体的To部分仍旧是aaa@example.com。
+
+Received部分至少存在一条。如果邮件在发送过程中通过中继转发的话，每一个中继都会创建一条Received，直到邮件投递到收件人所在的服务器。
+
+Base64编码
+
+Base64是一种将二进制的01序列转化成ASCII字符的编码方法。编码后的文本或者二进制消息，就可以运用SMTP等只支持ASCII字符的协议传送了。 Base64要求把每三个8Bit的字节转换为四个6Bit的字节（3*8 = 4*6 = 24），然后把6Bit再添两位高位0，组成四个8Bit的字节，也就是说，转换后的字符串理论上将要比原来的长1/3。 这部分对邮件大小的控制影响比较大。但部分MTA软件能够自动识别并允许这1/3的大小。
+
+邮件的收发
+
+Linux邮件服务器收发一封邮件是一个涉及广泛的过程。为了程序开发的简化，在收发邮件整个流程中，根据不同的功能特征和扮演的角色，将整个流程划分为几个部分。即如下几个模块：
+
+MUA 邮件用户代理，用于收发Mail的程序。
+MTA 邮件传输代理，转发Mail给指定用户的程序。
+MDA 邮件投递代理，将Mail投递到到用户账户的程序。
+IMAP4/POP3 程序，将Mail传输到MUA的程序。
+他们之间的联系如下图所示：
+
+mta
+
+Linux平台对上述三种服务器端的角色程序实现如下：
+
+MTA：sendmail Postfix Qmail
+MDA：Postfix-local&Virtual maildrop procmail
+IMAP4/POP3：dovecot，courier-imap cyrus-imap
+邮件在各个角色之间传输使用的有两种协议：SMTP和POP3/IMAP4。其中发送邮件和接受邮件都是用SMTP协议。按照如下方式被使用：
+
+MUA 到 MTA：SMTP
+MTA 到 MTA：SMTP
+MTA 到 MDA：IPC或I/O操作
+MDA 到 MUA：POP3或IMAP4
+相关域名知识
+
+Internet电子邮件收发需要在域名系统中添加MX记录，来声明邮件服务器的地址。 MX记录指明邮件转发服务器的主机名/ip。 对于反垃圾邮件的支持，需要在域名系统中的TXT记录包含SPF字段。用来声明几个（1/几个）“法定”的MTA（完全后缀主机名或IP地址）。
+
+当您把自己的电子邮件地址(user1@exmaple.com)给朋友后，他向您发了一封邮件。首先他的邮件提供商的邮件服务器向根域名服务器解析您的邮件地址后缀(example.com)。解析到exmaple.com域名所在的解析服务器的时候，对方邮件服务器向解析服务器请求mx类型的记录。解析服务器返回一个主机名(smtp.example.com)，然后对方服务器多次解析此主机名，直到解析到IP地址。然后向这个IP地址发起smtp请求，建立连接后开始传输邮件。
+
+上述过程说明，通过以电子邮件地址后缀域名的形式告诉对方。由对方服务器通过有规律的DNS解析操作来获取您的邮件服务器地址。也就是说E-mail服务依赖于DNS服务。这就是为什么设置MX记录。
+
+对方和您进行邮件交流之前，往往是没见过面的。这就也就是信任关系很难简历。加上上面提到From和return-path不一定相同，也就是任何人都可以以您的名义发送邮件。那么，如何在垃圾邮件盛行的情况下，声明您的身份呢？通过对DNS 的txt记录的利用很好的做到这点，创建一个主机名为空的内容为v=spf1 mx mx:mail.xiyang-liu.com –all记录。这条记录声明只有从mail.xiyang-liu.com这个主机解析出来的IP地址发出的邮件才是合法的邮件。其他地址发出的邮件一概为垃圾邮件。虽然不是所有的邮件服务器都明确依靠这项纪录。但是，尽可能地设置这条记录。
+
+Linux电子邮件系统中的各个模块
+
+所谓全功能收发，即满足所有用户需要的一个邮件系统。它应该包含如下多个功能模块： MTA 模块，POP3/IMAP模块 ，TLS/SSL安全加密，SASL验证模块，虚拟域和虚拟用户模块，反病毒发垃圾模块。
+
+MTA 模块
+
+MTA模块由Postfix或Sendmail实现。 MTA负责从MUA接收用户邮件，联系接收方MTA，建立连接，发送邮件到对方服务器。
+
+MTA使用SMTP协议通过TCP/25端口通信。SMTP支持TLS/SSL加密传输，加密的传输使用TCP/465端口。 但实际应用中大多使用25端口下的STARTTLS功能提供加密的传输。
+
+SMTP可结合SASL增加用户身份验证。 Postfix可用SASL来判断用户是否有权使用转发服务，或是辨认是谁在使用你的服务器。 SMTP通过SASL实现集中用户管理。
+
+POP3/IMAP模块
+
+用户通过MUA和Webmail两种形式访问邮件。 Webmail直接通过http读取maildir向用户展示邮件内容。 MUA使用POP3/IMAP4 协议从服务器下载邮件到本地，打开阅读邮件。
+
+POP3使用TCP/110端口，IMAP4 使用TCP/143端口。
+POP3/ TLS使用TCP/995端口 IMAP4/TLS使用TCP/993端口。
+加密模块
+
+SMTP POP3 IMAP等协议都支持使用TLS/SSL来加密传输，以保证信息的安全保密。 使用TLS/SSL需要一个知名CA签名的数字证书。 配置SMTP需要CA证书，经CA签名的服务器证书，服务器私钥。
+
+在邮件服务器测试过程中建议使用自签名证书的形式。但邮件服务器实际运行后，应当采用经过国际知名CA签名的数字证书。Postfix配置节选如下：
+
+smtp_tls_CAfiles = /etc/postfix/tls/cacert.pem
+smtp_tls_key_file = /etc/postfix/tls/smtpd-key.pem
+smtp_tls_cert_file = /etc/postfix/tls/smtpd-cert.pem
+smtpd_tls_CAfile = /etc/postfix/tls/cacert.pem
+smtpd_tls_cert_file = /etc/postfix/tls/smtpd-cert.pem
+smtpd_tls_key_file = /etc/postfix/tls/smtpd-key.pem
+安全验证模块
+
+SMTP POP3/IMAP4协同使用同一套集中存储的用户验证信息。 各种服务直接访问数据库会随之带来更多的安全问题，同时各个程序都需要开发针对数据库的接口程序。
+
+SASL提供更安全的访问数据库的统一接口。是解决多程序访问数据库的一个途径。
+SASL在用户和其他MTA主机连接SMTPD时，验证接收用户的有效性。
+SASL可作为拒绝垃圾邮件的一种有效的方式。
+虚拟用户和虚拟域
+
+邮箱帐户默认基于Unix/Linux用户管理。使用者拥有Unix/Linux主机的用户的同时拥有电子邮箱。 专业邮箱服务器应当支持非Unix/Linux主机账户的邮箱帐户。
+
+另外，由于Unix/Linux主机成本高昂，或者邮件服务器前期并没有太大的压力，邮箱服务器往往需要支持多个域名下用户邮件的收发。 配置虚拟用户和虚拟域需要增加用户信息集中存储机制。
+
+Postfix支持基于file，mysql，ldap存储的虚拟用户和虚拟域。 这里对用户信息的读取不经过SASL。
+
+反垃圾邮件和反邮件病毒
+
+反垃圾邮件在MTA收邮件时进行删选。 反邮件病毒在MDA将邮件投递到用户Maildir后扫描病毒，然后自动采取相应的处理方法。Linux反垃圾邮件以如下方法依次检查：
+
+是否本地网络的IP地址？ 通过不继续
+是否符合SASL验证？通过不继续
+发送者Email地址是否合法？
+接收者地址是否本地域？ 不通过跳出
+是否在本地的白名单或者黑名单中？通过不继续
+是否在用户的白名单或者黑名单中？通过不继续
+发送者IP 地址对应的DNS记录有没有TXT-SPF字段？
+发送主机IP地址在不在国际反垃圾组织数据库中？
+发送行为是否符合4xx临时错误300秒重试规则？

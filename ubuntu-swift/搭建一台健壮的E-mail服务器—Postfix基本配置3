@@ -1,0 +1,153 @@
+搭建一台健壮的E-mail服务器—Postfix基本配置讲解
+ 2013/06/24  邮件服务器  服务器搭建与应用  评论  6,900
+本文接上文：搭建一台健壮的E-mail服务器—Sendmail基础配置和SMTP命令行学习
+
+这部分文档主要讲解postfix最小化配置，极其配置文件中各个语句的作用。同时也尽作者所能，以通俗易懂的方式，讲解了postfix各个进程之间运作的原理。以便对配置文件的深入理解。
+
+Postfix收邮件过程
+
+Postfix通过smtpd/qmqpd，Postfix(由Postfix生成的邮件)收取邮件，并将邮件传递给cleanup处理。cleanup进程对收到的邮件做一些处理，必要时调用trivial-rewrite格式化不合格发件人地址后。将邮件存放到incoming队列中。
+
+通过sendmail调用接受的邮件先将邮件发送给postdrop，postdrop将邮件放置到maildrop队列中。在Postfix服务没启动的情况下，maildrop队列作为缓存存放待发送的邮件。一旦Postfix服务启动，有master创建的pickup进程就会检测maildrop队列中是否有邮件。此时maildrop中暂存的邮件就被pickup传递给cleanup处理了。
+
+下图为Postfix收取邮件流程简图(紫框 代表进程，蓝框 代表队列)：
+
+Postfix收取邮件流程图
+
+Postfix投递邮件过程
+
+qmgr进程从incoming队列中读取邮件，将邮件传递到active队列。为了防止active队列因为邮件数量过多造成内存溢出，设置用来暂存未处理邮件的deferred队列。qmgr每次从active队列取一封邮件多一些处理，必要时调用trivial-rewrite格式化不合格的收件人地址后，根据收件人域的不同将邮件投递给smtp，lmtp，local，virtual，pipe进程按照如下方法处理：
+
+smtp处理外部域的邮件，即外发邮件。
+lmtp常见于分布式电子邮件系统。用于处理去往代理目的端的邮件，即转发邮件。
+local处理基于Linux/Unix账户和包含邮件别名的邮件以及其他邮件，即到往本地账户，和用户名在/etc/aliases文件中的邮件。local可将邮件投递给第三方MDA，所以其他邮件由第三方MDA处理。
+virtual可简单处理基于virtual domains和virtual mailbox的邮件。
+pipe管道将邮件传递给第三方MDA处理。
+Postfix投递邮件流程简图如下：
+
+Postfix透底邮件流程图
+
+基础配置
+
+软件安装，需要安装E-mail Server 软件包组，在安装之前可以查看这个软件包组包含那些软件。
+
+[root@mail2 ~]# yum groupinfo 'E-mail Server'
+Loaded plugins: fastestmirror, presto, security
+Setting up Group Process
+
+Group: E-mail server
+Description: Allows the system to act as a SMTP and/or IMAP e-mail server. //组描述
+Default Packages:  //默认安装的软件包
+dovecot  //用来实现POP3/IMAP4服务
+postfix  //用来实现SMTP服务
+spamassassin  //用来检测垃圾邮件
+Optional Packages: //可选安装的软件
+clamav //反病毒
+clamav-data
+clamav-milter
+cyrus-imapd //另外一个POP3/IMAP4实现
+dovecot-mysql  //Dovecot的mysql扩展
+dovecot-pgsql
+dovecot-pigeonhole
+mailman //提供邮件列表功能
+opendkim
+sendmail
+sendmail-cf
+spambayes
+sqlgrey
+uw-imap
+安装软件包
+
+yum groupinstall “E-mail Server”
+切换MTA
+
+将系统默认的MTA从Sendmail切换到Postfix。
+
+[root@mail2 ~]# alternatives --config mta
+There are 2 programs which provide 'mta'.
+//*号表示默认值，+号表示生效
+Selection    command
+-----------------------------------------------
+* +1           /usr/sbin/sendmail.sendmail
++ 2           /usr/sbin/sendmail.postfix
+Enter to keep the current selection[+], or type selection number: <b>2</b>
+[root@mail2 ~]# chkconfig sendmail off
+[root@mail2 ~]# chkconfig postfix on
+[root@mail2 ~]# service sendmail stop
+Shutting down sm-client: [  OK  ]
+Shutting down sendmail: [  OK  ]
+[root@mail2 ~]# service postfix start
+Starting postfix: [  OK  ]
+设置Linux防火墙设置
+
+需要允许TCP 协议25 110 143 463 993 995 端口的入连接。编辑/etc/sysconfig/iptables 文件，根据实际情况，添加如下两行中的一行到包含“–dport 22 -j accept ”行的后面：
+
+-A INPUT -m state --state NEW -m multiport -p tcp --dport 25,110,143,465,993,995 -j ACCEPT
+#CentOS风格
+-A RH-Firewall-1-INPUT -m state --state NEW -m multiport -p tcp --dport 25,110,143,465,995,993 -j ACCEPT
+#Redhat风格
+service iptables restart
+Linux SElinux设置
+
+建议设置SElinux为Permissive 模式。但是不要在disabled。笔者还没有找到简单的解决Postfix和SElinux冲突方法。很有可能要手动编写SElinux模块。没时间和精力再捯饬SElinux了。设置为Permissive模式，留着以后解决。这点和政府对待钓鱼岛问题采取的策略一样，呵呵！
+
+[root@mail2 ~]# getenforce
+Enforcing
+[root@mail2 ~]# setenforce 0
+[root@mail2 ~]# getenforce
+Permissive
+编辑文件/etc/selinux/config做如下修改，使配置重启后仍旧生效。
+
+# This file controls the state of SELinux on the system.
+# SELINUX= can take one of these three values:
+#     enforcing - SELinux security policy is enforced.
+#     permissive - SELinux prints warnings instead of enforcing.
+#     disabled - No SELinux policy is loaded.
+SELINUX=permissive //修改部分
+# SELINUXTYPE= can take one of these two values:
+#     targeted - Targeted processes are protected,
+#     mls - Multi Level Security protection.
+SELINUXTYPE=targeted
+Postfix配置文件
+
+postfix主要有master.cf main.cf两个配置文件。main.cf文件开启或关闭Postfix功能，指明Postfix要操作的文件的路径，及其他信息。master.cf设定由master创建的子进程所使用的参数，创建的数量，子进程类型等。Postfix主进程为master；master根据master.cf配置创建子进程来完成邮件的收发。
+
+Postfix使用syslogd记录日志。其日志内容输出到/var/log/maillog
+
+main.cf必备配置
+
+myhostname = mail2.xiyang-liu.com
+#我的主机名
+mydomain = mail2.xiyang-liu.com
+#我的域
+myorigin = $mydomain
+#我发送出去的邮件用户名以什么结尾
+inet_interfaces = $myhostname
+#监听哪个ip地址，必要时修改/etc/hosts
+inet_protocols = all
+#只支持IPv4协议，还是IPv4 IPv6都支持
+mydestination = $myhostname,localhost
+#我收取用户名以什么结尾的邮件
+mynetworks_style = host
+#我信任的网络类型
+home_mailbox = Maildir/
+#“邮筒”类型。Unix style ，Q-mail style
+smtpd_banner = $myhostname ESMTP $mail_name ($mail_version)
+#smtpd 旗标
+验证配置
+
+首先，验证DNS配置是否生效。启动Postfix服务后，向163发送邮件。然后直接回复看能否收到。
+
+修改inet_interfaces 参数的值，使其分别取all， localhost，$myhostname。使用netstat -tnlp查看25端口分别在哪个地址监听？
+
+在inet_interfaces取值$myhostname的时候，很有可能会遇到Postfix服务起不来的情况，只需要在/etc/hosts文件中添加mail2.xiyang-liu.com 到 10.1.100.107的映射即可解决问题。添加到公网地址的映射行不行？你知道为什么吗？
+
+阅读配置文件确定mynetworks_style和mynetworks的关系，实际应用中改用哪个参数？
+
+mynetwork取值127.0.0.0/8时，分别在服务器本地(mail2.xiyang-liu.com)和你的电脑(随便一个客户端)通过telnet登录到mail2.xiyang-liu.com的25端口按照上面讲的方法发送一封邮件，看结果有何不同？你认为为什么？
+
+修改smtpd_banner内容，telnet 25端口查看有什么变化？你知道该如何伪装自己SMTP程序吗？你看，一不小心也涉及到安全范畴了不是。
+
+查看/var/log/maillog日志记录，看cleanup，qmgr等进程是怎么处理邮件的？对照上面的收信和投递流程理解。
+
+文档讲解了Postfix基础配置的详细方法。包含切换MTA，main.cf文件讲解，pickup、clean、qmgr等进程协作方法，main.cf配置文件各配置语句的意义，和验证Postfix配置文件个语句的作用等知识点。当然也包括linux防火墙和selinux的相关配置。希望通过这些配置帮助读者加深对Postfix的理解。
